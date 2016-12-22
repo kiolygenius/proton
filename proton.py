@@ -14,12 +14,12 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 '''
-import sys        
+import sys
 
 if sys.version_info < (3, 0):
     print('python version need more than 3.x')
     sys.exit()
-    
+
 import os
 import string
 import collections
@@ -63,7 +63,10 @@ def isoutofdate(srcfile, tarfile):
     return not os.path.isfile(tarfile) or os.path.getmtime(srcfile) > os.path.getmtime(tarfile)
 
 def gerexportfilename(root, format_, folder):
-    filename = root +  '.' + format_
+    if format_ == 'py':
+        filename = root.lower() +  '.' + format_
+    else:
+        filename = root +  '.' + format_
     return os.path.join(folder, filename)
 
 def splitspace(s):
@@ -133,14 +136,59 @@ def tolua(obj, indent = 0):
             if not islist:
                 k = i
                 i = obj[k]
-                yield k 
+                if isinstance(k, int):
+                    yield '[' + str(k) + ']'
+                else:
+                    yield k
                 yield ' = '                
             for part in tolua(i, indent):
                 yield part
         indent -= 1
         yield newline(indent)
         yield '}'
+
+def topython(obj, indent=0):
+    def newline(count):
+        return '\n' + '  ' * count
     
+    if isinstance(obj, int) or isinstance(obj, float) or isinstance(obj, str):
+        yield str(obj)
+    else:
+        indent += 1
+        islist = isinstance(obj, list)
+        if islist:
+            yield '['
+        else:
+            yield '{'
+        isfirst = True
+        for i in obj:
+            if isfirst:
+                isfirst = False
+            else:
+                yield ','
+            yield newline(indent)
+            if not islist: # is dict
+                vl = obj[i]
+                if isinstance(i, str):
+                    yield '\"' + i + '\":'
+                else:
+                    yield str(i) + ':'
+
+                for p in topython(vl, indent):
+                    yield p
+            else:
+                for p in topython(i, indent):
+                    yield p
+        indent -= 1
+        yield newline(indent)
+        if islist:
+            yield ']'
+        else:
+            yield '}'
+                
+def savetopython(obj):
+    return "#encoding:utf-8\ndata=" + ''.join(topython(obj))
+
 def exportexcel(context):
     Exporter(context).export()
     print("export finsish successful!!!")
@@ -194,9 +242,15 @@ class Exporter:
             type_.mark = p.group(2)
             type_.field = p.group(3)
             return type_
-            
         raise ValueError('%s is not a legal type' % type_)
     
+    def getname(self, name): #check is the property as a key
+        p = re.search('(\S+)\((KEY|Key|key)\)', name)
+        if p:
+            return p.group(1),True
+        else:
+            return name,False
+
     def buildlistexpress(self, parent, type_, name, value, isschema):
         basetype = type_[:-2]        
         list_ = []
@@ -263,7 +317,7 @@ class Exporter:
         if not isschema and isinstance(typename, BindType):
             self.addconstraint(typename.mark, typename.field, (type_, name, value))
         
-    def buildexpress(self, parent, type_, name, value, isschema = False):
+    def buildexpress(self, parent, type_, name, value, isschema=False):
         typename = self.gettype(type_)
         if typename == 'list':
             self.buildlistexpress(parent, type_, name, value, isschema)
@@ -271,14 +325,14 @@ class Exporter:
             self.buildobjexpress(parent, type_, name, value, isschema)
         else:
             self.buildbasexpress(parent, type_, name, value, isschema)
-    
+
     def export(self):
         paths = re.split(r'[,'+ string.whitespace + ']+', context.path.strip())
 
         for self.path in paths:
             if not self.path:
                 continue
-            
+
             self.checkpath(self.path)
             data = xlrd.open_workbook(self.path)
             for sheet in data.sheets():
@@ -294,7 +348,7 @@ class Exporter:
                         item = None
                     exportfile = gerexportfilename(root, self.context.format, self.context.folder)
                     self.checksheetname(self.path, sheet.name, root)
-                    
+
                     exportobj = None
                     if isoutofdate(self.path, exportfile):
                         if item:
@@ -347,6 +401,7 @@ class Exporter:
             raise e
             
         list_ = []
+        dict_ = {}
         
         try:
             spacerowcount = 0
@@ -363,10 +418,12 @@ class Exporter:
                 
                 if not firsttext or firsttext[0] == '#':    # current line skip
                     continue
-            
+                keyname = ''
                 for self.colindex in range(sheet.ncols):
                     type_ = titleinfos[self.colindex][0]
-                    name = titleinfos[self.colindex][1]
+                    name, iskey = self.getname(titleinfos[self.colindex][1])
+                    if iskey:
+                        keyname = name
                     signmatch = titleinfos[self.colindex][2]
                     value = str(row[self.colindex]).strip()
                     
@@ -376,12 +433,15 @@ class Exporter:
                         spacerowcount = 0    
                         
                 if item:
-                    list_.append(item)
+                    if len(keyname) > 0:
+                        dict_[item[keyname]] = item
+                    else:
+                        list_.append(item)
         except Exception as e:        
             e.args += ('%s has a error in %d row %d column in %s' % (sheet.name, self.rowindex + 1, self.colindex + 1, self.path) , '')
             raise e
         
-        return (schemaobj, list_)
+        return (schemaobj, list_) if len(list_) > 0 else (schemaobj, dict_)
         
     def exportconfigsheet(self, sheet, titleindexs):
         nameindex = titleindexs[0]
@@ -466,6 +526,11 @@ class Exporter:
             luastr = 'return\n' + luastr
             with codecs.open(record.exportfile, 'w', 'utf-8') as f:
                 f.write(luastr)
+            print('save %s from %s in %s' % (record.exportfile, record.sheet.name, record.path))
+        elif self.context.format == 'py':
+            pystr = savetopython(record.obj)
+            with codecs.open(record.exportfile, 'w', 'utf-8') as f:
+                f.write(pystr)
             print('save %s from %s in %s' % (record.exportfile, record.sheet.name, record.path))
     
     def addrecord(self, path, sheet, exportfile, root, item, obj, exportmark):
