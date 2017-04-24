@@ -130,8 +130,8 @@ def savexml(record):
     with codecs.open(record.exportfile, 'w', 'utf-8') as f:
         dom.writexml(f, '', '    ', '\n', 'utf-8')
 
-    print('save %s from %s in %s' %
-          (record.exportfile, record.sheet.name, record.path))
+    #print('save %s from %s in %s' %
+    #      (record.exportfile, record.sheet.name, record.path))
 
 
 def tolua(obj, indent=0):
@@ -212,7 +212,7 @@ def savetopython(obj):
 
 def exportexcel(context):
     Exporter(context).export()
-    print("export finsish successful!!!")
+    #print("export finsish successful!!!")
 
 
 class BindType:
@@ -623,7 +623,8 @@ class Exporter:
                 r.setobj(exportobj)
 
             v = c.valueinfo[2]
-            i = next((i for i in r.obj if i[c.field] == v), False)
+            lst = (i for i in r.obj if (r.obj[i])[c.field] == v)
+            i = next(lst, False)
             if not i:
                 raise ValueError(
                     '%s(field) %s not found ,%s has a constraint %s error in %d row %d column in %s'
@@ -649,7 +650,7 @@ if __name__ == '__main__':
         
         https://github.com/sy-yanghuan/proton'''
 
-    print('argv:', sys.argv)
+    #print('argv:', sys.argv)
     opst, args = getopt.getopt(sys.argv[1:], 'p:f:e:s:t:c:h')
 
     context = Context()
