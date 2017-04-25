@@ -30,6 +30,7 @@ import json
 import xml.etree.ElementTree as ElementTree
 import xml.dom.minidom as minidom
 import xlrd
+from collections import OrderedDict
 
 
 def fillvalue(parent, name, value, isschema):
@@ -439,7 +440,7 @@ class Exporter:
             raise e
 
         list_ = []
-        dict_ = {}
+        dict_ = OrderedDict()
 
         try:
             spacerowcount = 0
