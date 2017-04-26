@@ -171,8 +171,10 @@ def topython(obj, indent=0):
     def newline(count):
         return '\n' + '  ' * count
 
-    if isinstance(obj, int) or isinstance(obj, float) or isinstance(obj, str):
+    if isinstance(obj, int) or isinstance(obj, float):
         yield str(obj)
+    elif isinstance(obj, str):
+        yield '\"' + str(obj) + '\"'
     else:
         indent += 1
         islist = isinstance(obj, list)
