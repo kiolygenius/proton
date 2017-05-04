@@ -63,8 +63,8 @@ def getexportmark(sheetName):
 def issignmatch(signarg, sign):
     if signarg is None:
         return True
-    return True if [s for s in re.split(r'[/\\, :]', sign)
-                    if s in signarg] else False
+    sn = [s for s in re.split(r'[/\\, :]', sign) if s in [signarg]]
+    return True if sn else False
 
 
 def isoutofdate(srcfile, tarfile):
