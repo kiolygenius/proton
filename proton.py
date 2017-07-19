@@ -157,6 +157,8 @@ def tolua(obj, indent=0):
                 i = obj[k]
                 if isinstance(k, int):
                     yield '[' + str(k) + ']'
+                elif isinstance(k, str):
+                    yield '[\"' + str(k) + '\"]'
                 else:
                     yield k
                 yield ' = '
@@ -194,7 +196,7 @@ def topython(obj, indent=0):
                 if isinstance(i, str):
                     yield '\"' + i + '\":'
                 else:
-                    yield str(i) + ':'
+                    yield '\"' + str(i) + '\":'
 
                 for p in topython(vl, indent):
                     yield p
