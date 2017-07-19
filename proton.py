@@ -196,7 +196,7 @@ def topython(obj, indent=0):
                 if isinstance(i, str):
                     yield '\"' + i + '\":'
                 else:
-                    yield '\"' + str(i) + '\":'
+                    yield str(i) + ':'
 
                 for p in topython(vl, indent):
                     yield p
