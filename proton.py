@@ -39,7 +39,10 @@ def fillvalue(parent, name, value, isschema):
     else:
         if isschema and not re.match('^_|[a-zA-Z]\w+$', name):
             raise ValueError('%s is a illegal identifier' % name)
-        parent[name] = value
+        if re.match('[0-9]+', name):
+            parent[int(float(name))] = value
+        else:
+            parent[name] = value
 
 
 def getindex(infos, name):
