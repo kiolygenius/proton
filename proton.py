@@ -14,7 +14,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 '''
-import sys
+import sys 
 
 if sys.version_info < (3, 0):
     print('python version need more than 3.x')
@@ -22,7 +22,7 @@ if sys.version_info < (3, 0):
 
 import os
 import string
-import collections
+import collections 
 import codecs
 import getopt
 import re
@@ -50,7 +50,6 @@ def getindex(infos, name):
         if item == name:
             return index
     return -1
-
 
 def getscemainfo(typename, description):
     if isinstance(typename, BindType):
@@ -137,8 +136,113 @@ def savexml(record):
     #print('save %s from %s in %s' %
     #      (record.exportfile, record.sheet.name, record.path))
 
+def tolua_global_index(title):
+    res = ""
+    if title is None:
+        return res
+    else:
+        def_content = ""
+        res += "local map = {"
+        i = 0
+        iValid = 0
+        kvCols = []
+        kvArrayCols = []
+        for col in title:
+            if not col[2]:
+                i += 1
+                continue
+            name, isKey = Exporter.getname(col[1])
+            nameSubfix = ("s" if Exporter.sgettype(col[0]) == 'list' else "")
+            res = res + "[\"" + name + nameSubfix + "\"] = " + str(iValid + 1) + ", "
+            if len(col[0]) > 2 and col[0][-2:] == '[]':
+                def_val = "nil"
+            elif len(col[0]) > 2 and col[0][0] == '{' and col[0][-1:] == '}' or col[3] == None:
+                def_val = "nil"
+            else:
+                def_val = "".join(tolua(Exporter.strtovalue(col[0], col[3]), None))
+            def_content = def_content + "[\"" + name + nameSubfix + "\"] = " + def_val + ", "
+            #记录key:value的列，后面用到
+            if len(col[0]) > 2 and col[0][0] == '{':
+                if col[0][-1:] == '}':
+                    kvCols.append(i)
+                elif col[0][-2:] == '[]':
+                    kvArrayCols.append(i)
 
-def tolua(obj, indent=0):
+            i += 1
+            iValid += 1
+        
+        res = res + "}\n"
+        res = res + "local def_map = {"
+        res = res + def_content
+        res = res + "}\n"
+
+        res = res + "local global_index = function(tb, key)\n"
+        res = res + "  local val = rawget(tb, map[key])\n"
+        res = res + "  if val ~= nil then\n"
+        res = res + "    return val\n"
+        res = res + "  else\n"
+        res = res + "    return def_map[key]\n"
+        res = res + "  end\n"
+        res = res + "end\n"
+        # 类型为key:value或者key:value[]的需要额外索引key
+        
+        res = res + 'for k, v in pairs(config) do\n'
+        res = res + "  setmetatable(v, {__index=global_index, key_map=map})\n"
+        for idx in kvCols:
+            kv = title[idx][0].strip('{}').split(':')
+            try:
+                kname = kv[0].split(' ')[1]
+            except:
+                raise ''
+            vname = kv[1].split(' ')[1]
+            res = res + '  if v[\"' + title[idx][1] + '\"] ~= nil then\n'
+            res = res + '    setmetatable(v[\"' + title[idx][1] + '\"], {__index=function(tb, key) if key == \"' + kname + '\" then return rawget(tb, 1) elseif key == \"'+vname+'\" then return rawget(tb, 2) else return tb[key] end end})\n'
+            res = res + '  end\n'
+
+        for idx in kvArrayCols:
+            kv = title[idx][0][0:-2].strip('{}').split(':')
+            kname = kv[0].split(' ')[1]
+            vname = kv[1].split(' ')[1]
+            res = res + '  if v[\"' + title[idx][1] + '\"] ~= nil then\n'
+            res = res + '    for i, ele in ipairs(v[\"' + title[idx][1] + '\"]) do\n'
+            res = res + '      setmetatable(ele, {__index=function(tb, key) if key == \"' + kname + '\" then return rawget(tb, 1) elseif key == \"'+vname+'\" then return rawget(tb, 2) else return tb[key] end end})\n'
+            res = res + '    end\n'
+            res = res + '  end\n'
+        
+        res = res + 'end\n'
+        return res
+    return ""
+
+#判断name是title中的一个key value pair 的key
+def isAKeyValueKey(col, name):
+    if len(col[0]) > 2 and col[0][0] == '{' and (col[0][-1] == '}' or col[0][-3] == '}'):
+        kv = col[0].strip('{}').split(':')
+        return kv[0].split(' ')[1] == name
+
+#判断name是title中的一个key value pair 的value
+def isAKeyValueValue(col, name):
+    if len(col[0]) > 2 and col[0][0] == '{' and (col[0][-1] == '}' or col[0][-3] == '}'):
+        kv = ''
+        if col[0][-2:] == '[]':
+            kv = col[0][0:-2].strip('{}').split(':')
+        else:
+            kv = col[0].strip('{}').split(':')
+        return kv[1].split(' ')[1] == name
+
+#取出title的name列
+def getcolbyname(title, name):
+    idx = 0
+    for col in title:
+        colName, key = Exporter.getname(col[1])
+        type_ = Exporter.sgettype(col[0])
+        if colName == name or (type_ == 'list' and colName+"s" == name):
+            return col, idx
+        if col[2]:
+            idx += 1
+    
+    return [], -1
+
+def tolua(obj, title, indent=0, col=None):
     def newline(count):
         return '\n' + '  ' * count
 
@@ -149,24 +253,55 @@ def tolua(obj, indent=0):
         yield '{'
         islist = isinstance(obj, list)
         isfirst = True
+        idx = 0
         for i in obj:
             if isfirst:
                 isfirst = False
             else:
                 yield ','
             yield newline(indent)
+            if indent == 2 and title is not None:
+                col, idx = getcolbyname(title, i)
+            
             if not islist:
                 k = i
                 i = obj[k]
                 if isinstance(k, int):
                     yield '[' + str(k) + ']'
                 elif isinstance(k, str):
-                    yield '[\"' + str(k) + '\"]'
+                    #如果有title，则用title映射的idx作为key，之后再设置metatable的__index
+                    if indent == 2 and title is not None: #第一级索引优化
+                        yield '[' + str(idx + 1) + ']'
+                    elif indent == 3 and title is not None: # 第二级（key:value）索引优化
+                        if isAKeyValueKey(col, k):
+                            yield '[1]'
+                        elif isAKeyValueValue(col, k):
+                            yield '[2]'
+                        else:
+                            yield '[\"' + str(k) + '\"]'
+                    elif indent == 4 and title is not None: # 第三级（key:value[]）索引优化
+                        if isAKeyValueKey(col, k):
+                            yield '[1]'
+                        elif isAKeyValueValue(col, k):
+                            yield '[2]'
+                        else:
+                            yield '[\"' + str(k) + '\"]'
+                    else:
+                        yield '[\"' + str(k) + '\"]'
                 else:
                     yield k
                 yield ' = '
-            for part in tolua(i, indent):
-                yield part
+            
+            isObj = None
+            if indent == 2 and title is not None:
+                isObj = Exporter.sgettype(col[0]) == 'obj'
+            if indent == 2 and title is not None and not isObj and str(i) == col[3]: #默认值优化
+                yield 'nil'
+            elif indent == 2 and title is not None and isObj and len(i) == 0:
+                yield 'nil'
+            else:
+                for part in tolua(i, title, indent, col):
+                    yield part
         indent -= 1
         yield newline(indent)
         yield '}'
@@ -244,6 +379,7 @@ class Record:
     def setobj(self, obj):
         self.schema = obj[0] if obj else None
         self.obj = obj[1] if obj else None
+        self.title = obj[2] if obj and len(obj)>2 else None
 
 
 class Constraint:
@@ -261,13 +397,16 @@ class Exporter:
         self.records = []
         self.constraints = []
 
-    def gettype(self, type_):
-        if type_[-2] == '[' and type_[-1] == ']':
+    @staticmethod
+    def sgettype(type_):
+        if len(type_) > 2 and type_[-2] == '[' and type_[-1] == ']':
             return 'list'
-        if type_[0] == '{' and type_[-1] == '}':
+        if len(type_) > 2 and type_[0] == '{' and type_[-1] == '}':
             return 'obj'
         if type_ in ('int', 'double', 'string', 'bool'):
             return type_
+        if type_ == '':
+            return 'string'
 
         p = re.search(
             '(int|string)[' + string.whitespace + ']*\((\S+)\.(\S+)\)', type_)
@@ -278,7 +417,11 @@ class Exporter:
             return type_
         raise ValueError('%s is not a legal type' % type_)
 
-    def getname(self, name):  #check is the property as a key
+    def gettype(self, type_):
+        return Exporter.sgettype(type_)
+
+    @staticmethod
+    def getname(name):  #check is the property as a key
         p = re.search('(\S+)\((KEY|Key|key)\)', name)
         if p:
             return p.group(1), True
@@ -292,10 +435,12 @@ class Exporter:
             self.buildexpress(list_, basetype, name, None, isschema)
             list_ = getscemainfo(list_[0], value)
         else:
-            valuelist = value.strip('[]').split(',')
-            for v in valuelist:
-                if not v.isspace():
-                    self.buildexpress(list_, basetype, name, v)
+            stripped = value.strip('[]')
+            if stripped != "":
+                valuelist = stripped.split(',')
+                for v in valuelist:
+                    if not v.isspace():
+                        self.buildexpress(list_, basetype, name, v)
 
         fillvalue(parent, name + 's', list_, isschema)
 
@@ -309,44 +454,51 @@ class Exporter:
                 self.buildexpress(obj, fieldtype, fieldname, None, isschema)
             obj = getscemainfo(obj, value)
         else:
-            fieldValues = value.strip('{}').split(':')
-            for i in range(0, len(fieldnamestypes)):
-                if i < len(fieldValues):
-                    fieldtype, fieldname = splitspace(fieldnamestypes[i])
-                    self.buildexpress(obj, fieldtype, fieldname,
-                                      fieldValues[i])
+            if value:
+                fieldValues = value.strip('{}').split(':')
+                for i in range(0, len(fieldnamestypes)):
+                    if i < len(fieldValues):
+                        fieldtype, fieldname = splitspace(fieldnamestypes[i])
+                        self.buildexpress(obj, fieldtype, fieldname,
+                                        fieldValues[i])
 
         fillvalue(parent, name, obj, isschema)
-
+    
+    @staticmethod
+    def strtovalue(type_, value):
+        typename = Exporter.sgettype(type_)
+        if typename == 'int':
+            value = int(float(value))
+        elif typename == 'double':
+            value = float(value)
+        elif typename == 'string':
+            if value.endswith('.0'):  # may read is like "123.0"
+                try:
+                    value = str(int(float(value)))
+                except ValueError:
+                    value = str(value)
+            else:
+                value = str(value)
+        elif typename == 'bool':
+            try:
+                value = int(float(value))
+                value = False if value == 0 else True
+            except ValueError:
+                value = value.lower()
+                if value in ('false', 'no', 'off'):
+                    value = False
+                elif value in ('true', 'yes', 'on'):
+                    value = True
+                else:
+                    raise ValueError('%s is a illegal bool value' % value)
+        return value
+    
     def buildbasexpress(self, parent, type_, name, value, isschema):
         typename = self.gettype(type_)
         if isschema:
             value = getscemainfo(typename, value)
         else:
-            if typename == 'int':
-                value = int(float(value))
-            elif typename == 'double':
-                value = float(value)
-            elif typename == 'string':
-                if value.endswith('.0'):  # may read is like "123.0"
-                    try:
-                        value = str(int(float(value)))
-                    except ValueError:
-                        value = str(value)
-                else:
-                    value = str(value)
-            elif typename == 'bool':
-                try:
-                    value = int(float(value))
-                    value = False if value == 0 else True
-                except ValueError:
-                    value = value.lower()
-                    if value in ('false', 'no', 'off'):
-                        value = False
-                    elif value in ('true', 'yes', 'on'):
-                        value = True
-                    else:
-                        raise ValueError('%s is a illegal bool value' % value)
+            value = Exporter.strtovalue(type_, value)
         fillvalue(parent, name, value, isschema)
 
         if not isschema and isinstance(typename, BindType):
@@ -399,8 +551,6 @@ class Exporter:
                         print(exportfile + ' is not change, so skip!')
                     self.addrecord(self.path, sheet, exportfile, root, item,
                                    exportobj, exportmark)
-
-        self.checkconstraint()
         self.saves()
 
     def getconfigsheetfinfo(self, sheet):
@@ -430,10 +580,18 @@ class Exporter:
         try:
             for colindex in range(sheet.ncols):
                 type_ = str(types[colindex]).strip()
-                name = str(names[colindex]).strip()
+                name_and_default = str(names[colindex]).strip()
+                #修改 name 改为 字段[(主键)][=默认值]，主键没填写则为非主键，默认值没填写，则为根据类型填充默认值 
+                name_default_array = name_and_default.split("=", 1)
+                name = name_default_array[0]
+                if len(name_default_array) == 2:
+                    def_val = name_default_array[1]
+                else:
+                    def_val = None
+                
                 signmatch = issignmatch(self.context.sign,
                                         str(signs[colindex]).strip())
-                titleinfos.append((type_, name, signmatch))
+                titleinfos.append((type_, name, signmatch, def_val))
 
                 if self.context.codegenerator:
                     if type_ and name and signmatch:
@@ -473,8 +631,10 @@ class Exporter:
                     signmatch = titleinfos[self.colindex][2]
                     value = str(row[self.colindex]).strip()
 
-                    if type_ and name and value:
-                        if signmatch:
+                    if type_ and name:
+                        if not value:
+                            value = titleinfos[self.colindex][3]
+                        if signmatch and value:
                             self.buildexpress(item, type_, name, value)
                         spacerowcount = 0
 
@@ -489,7 +649,7 @@ class Exporter:
                         self.path), '')
             raise e
 
-        return (schemaobj, list_) if len(list_) > 0 else (schemaobj, dict_)
+        return (schemaobj, list_, titleinfos) if len(list_) > 0 else (schemaobj, dict_, titleinfos)
 
     def exportconfigsheet(self, sheet, titleindexs):
         nameindex = titleindexs[0]
@@ -579,8 +739,10 @@ class Exporter:
             savexml(record)
 
         elif self.context.format == 'lua':
-            luastr = "".join(tolua(record.obj))
-            luastr = 'return\n' + luastr
+            luastr = "".join(tolua(record.obj, record.title))
+            #luastr = 'return\n' + luastr
+            luastr = 'local config=\n' + luastr + "\n" + (tolua_global_index(record.title) if record.item is not None else "")
+            luastr = luastr + '\nreturn config'
             with codecs.open(record.exportfile, 'w', 'utf-8') as f:
                 f.write(luastr)
             print('save %s from %s in %s' %
@@ -616,28 +778,6 @@ class Exporter:
         c.rowindex = self.rowindex
         c.colindex = self.colindex
         self.constraints.append(c)
-
-    def checkconstraint(self):
-        for c in self.constraints:
-            r = next((r for r in self.records if r.item == c.mark), False)
-            if not r:
-                raise ValueError(
-                    '%s(mark) not found ,%s has a constraint %s error in %d row %d column in %s'
-                    % (c.mark, c.sheetname, c.valueinfo, c.rowindex + 1,
-                       c.colindex + 1, c.path))
-
-            if not r.obj:  # is not change so not load
-                exportobj = self.exportitemsheet(r.sheet)
-                r.setobj(exportobj)
-
-            v = c.valueinfo[2]
-            lst = (i for i in r.obj if (r.obj[i])[c.field] == v)
-            i = next(lst, False)
-            if not i:
-                raise ValueError(
-                    '%s(field) %s not found ,%s has a constraint %s error in %d row %d column in %s'
-                    % (c.field, v, c.sheetname, c.valueinfo, c.rowindex + 1,
-                       c.colindex + 1, c.path))
 
 
 if __name__ == '__main__':
@@ -683,4 +823,6 @@ if __name__ == '__main__':
         elif op == '-h':
             print(Context.__doc__)
             sys.exit()
+    #print("handling file " + context.path)
     exportexcel(context)
+
