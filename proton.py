@@ -33,7 +33,7 @@ import xlrd
 from collections import OrderedDict
 
 
-def fillvalue(parent, name, value, isschema):
+def fillvalue(parent, name, value, isschema, plural = False):
     if isinstance(parent, list):
         parent.append(value)
     else:
@@ -42,7 +42,7 @@ def fillvalue(parent, name, value, isschema):
         if re.match('[0-9]+', name):
             parent[int(float(name))] = value
         else:
-            parent[name] = value
+            parent[name + ('s' if plural else '')] = value
 
 
 def getindex(infos, name):
@@ -442,7 +442,7 @@ class Exporter:
                     if not v.isspace():
                         self.buildexpress(list_, basetype, name, v)
 
-        fillvalue(parent, name + 's', list_, isschema)
+        fillvalue(parent, name, list_, isschema, True)
 
     def buildobjexpress(self, parent, type_, name, value, isschema):
         obj = collections.OrderedDict()
