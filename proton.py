@@ -39,7 +39,7 @@ def fillvalue(parent, name, value, isschema, plural = False):
     else:
         if isschema and not re.match('^_|[a-zA-Z]\w+$', name):
             raise ValueError('%s is a illegal identifier' % name)
-        if re.match('[0-9]+', name):
+        if re.match('-?[0-9]+', name):
             parent[int(float(name))] = value
         else:
             parent[name + ('s' if plural else '')] = value
